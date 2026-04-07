@@ -88,21 +88,19 @@ if prompt:
 
     try:
         payload = [prompt]
-        has_file_payload = False
+        has_uploaded_file = False
 
         if uploaded_file is not None:
-            file_bytes = uploaded_file.getvalue()
-            if file_bytes:
-                has_file_payload = True
-                payload.append(
-                    {
-                        "mime_type": uploaded_file.type or "application/octet-stream",
-                        "data": file_bytes,
-                    }
-                )
+            has_uploaded_file = True
+            payload.append(
+                {
+                    "mime_type": uploaded_file.type or "application/octet-stream",
+                    "data": uploaded_file.getvalue(),
+                }
+            )
 
         with st.spinner("מנתח ומנסח..."):
-            response = st.session_state.chat.send_message(payload if has_file_payload else prompt)
+            response = st.session_state.chat.send_message(payload)
 
         with st.chat_message("assistant"):
             if response.text:
@@ -110,7 +108,7 @@ if prompt:
             else:
                 st.error("לא התקבלה תשובה מהמודל. אנא נסה שנית.")
 
-        if has_file_payload:
+        if has_uploaded_file:
             st.session_state.uploader_key += 1
             st.rerun()
     except Exception as e:
