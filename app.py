@@ -87,12 +87,10 @@ if prompt:
         st.markdown(prompt)
 
     try:
-        payload = [prompt]
-        has_uploaded_file = False
+        message_payload = [prompt]
 
         if uploaded_file is not None:
-            has_uploaded_file = True
-            payload.append(
+            message_payload.append(
                 {
                     "mime_type": uploaded_file.type or "application/octet-stream",
                     "data": uploaded_file.getvalue(),
@@ -100,7 +98,7 @@ if prompt:
             )
 
         with st.spinner("מנתח ומנסח..."):
-            response = st.session_state.chat.send_message(payload)
+            response = st.session_state.chat.send_message(message_payload)
 
         with st.chat_message("assistant"):
             if response.text:
@@ -108,7 +106,7 @@ if prompt:
             else:
                 st.error("לא התקבלה תשובה מהמודל. אנא נסה שנית.")
 
-        if has_uploaded_file:
+        if uploaded_file is not None:
             st.session_state.uploader_key += 1
             st.rerun()
     except Exception as e:
