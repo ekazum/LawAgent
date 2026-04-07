@@ -57,10 +57,13 @@ st.markdown(
 
 with st.sidebar:
     st.subheader("ראיות ומסמכים")
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
     uploaded_file = st.file_uploader(
         "העלה מסמך לניתוח",
         type=["pdf", "txt", "png", "jpg", "jpeg"],
         help="הקובץ יצורף להודעה הבאה שתשלח בצ'אט.",
+        key=f"evidence_uploader_{st.session_state.uploader_key}",
     )
 
 if "chat" not in st.session_state:
@@ -85,10 +88,12 @@ if prompt:
 
     try:
         payload = [prompt]
+        has_file_payload = False
 
         if uploaded_file is not None:
             file_bytes = uploaded_file.getvalue()
             if file_bytes:
+                has_file_payload = True
                 payload.append(
                     {
                         "mime_type": uploaded_file.type or "application/octet-stream",
@@ -97,12 +102,16 @@ if prompt:
                 )
 
         with st.spinner("מנתח ומנסח..."):
-            response = st.session_state.chat.send_message(payload if len(payload) > 1 else prompt)
+            response = st.session_state.chat.send_message(payload if has_file_payload else prompt)
 
         with st.chat_message("assistant"):
             if response.text:
                 st.markdown(response.text)
             else:
                 st.error("לא התקבלה תשובה מהמודל. אנא נסה שנית.")
+
+        if has_file_payload:
+            st.session_state.uploader_key += 1
+            st.rerun()
     except Exception as e:
         st.error(f"אירעה שגיאה במהלך השיחה: {e}")
