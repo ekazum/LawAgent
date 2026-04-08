@@ -121,12 +121,13 @@ function App() {
               type="password"
               placeholder="Gemini API Key"
               value={apiKey}
+              onFocus={() => setShowSavedFeedback(false)}
               onChange={(event) => {
                 setApiKey(event.target.value);
                 setShowSavedFeedback(false);
               }}
             />
-            <button type="button" onClick={saveApiKey} aria-label="Save API key">
+            <button type="button" onClick={saveApiKey} aria-label="שמור מפתח API">
               שמור
             </button>
             {showSavedFeedback && <span className="saved-feedback">✅ נשמר</span>}
