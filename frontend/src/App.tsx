@@ -126,7 +126,7 @@ function App() {
                 setShowSavedFeedback(false);
               }}
             />
-            <button type="button" onClick={saveApiKey}>
+            <button type="button" onClick={saveApiKey} aria-label="Save API key">
               שמור
             </button>
             {showSavedFeedback && <span className="saved-feedback">✅ נשמר</span>}
