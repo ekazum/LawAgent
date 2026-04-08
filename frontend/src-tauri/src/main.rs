@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
-use tauri::process::{Command, CommandEvent};
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 struct BackendState {
     port: Mutex<u16>,
@@ -22,11 +22,15 @@ fn main() {
     drop(listener);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(BackendState {
             port: Mutex::new(backend_port),
         })
-        .setup(move |_| {
-            let sidecar_command = Command::new_sidecar("python-backend")
+        .setup(move |app| {
+            let sidecar_command = app
+                .handle()
+                .shell()
+                .sidecar("python-backend")
                 .map_err(|e| format!("failed to create sidecar command: {e}"))?;
 
             let (mut receiver, _) = sidecar_command
