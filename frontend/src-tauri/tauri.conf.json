@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.lawagent.app",
   "build": {
-    "beforeDevCommand": "npm --prefix ../frontend run dev",
-    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "beforeDevCommand": "npm --prefix .. run dev",
+    "beforeBuildCommand": "npm --prefix .. run build",
     "devUrl": "http://localhost:5173",
-    "frontendDist": "../frontend/dist"
+    "distDir": "../dist"
   },
   "app": {
     "windows": [
