@@ -23,11 +23,12 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "identifier": "com.lawagent.app",
     "externalBin": [
       "bin/python-backend"
-    ]
+    ],
+    "active": true,
+    "targets": "all"
   },
   "plugins": {}
 }
