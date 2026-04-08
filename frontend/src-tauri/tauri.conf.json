@@ -23,6 +23,9 @@
     }
   },
   "bundle": {
+    "icon": [
+      "icons/icon.ico"
+    ],
     "externalBin": [
       "bin/python-backend"
     ],
