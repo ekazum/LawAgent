@@ -64,6 +64,10 @@
   gap: 0.5rem;
 }
 
+.api-key-row {
+  align-items: center;
+}
+
 .text-input {
   flex: 1;
   border: 1px solid #cbd5e1;
@@ -83,4 +87,10 @@ button {
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.saved-feedback {
+  color: #16a34a;
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
