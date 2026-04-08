@@ -41,8 +41,12 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = receiver.recv().await {
                     match event {
-                        CommandEvent::Stdout(line) => println!("[python-backend] {line}"),
-                        CommandEvent::Stderr(line) => eprintln!("[python-backend] {line}"),
+                        CommandEvent::Stdout(line) => {
+                            println!("[python-backend] {}", String::from_utf8_lossy(&line))
+                        }
+                        CommandEvent::Stderr(line) => {
+                            eprintln!("[python-backend] {}", String::from_utf8_lossy(&line))
+                        }
                         _ => {}
                     }
                 }
