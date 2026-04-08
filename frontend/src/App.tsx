@@ -83,9 +83,13 @@ function App() {
       setSelectedFile(null);
     } catch (error) {
       console.error(error);
+      const message =
+        error instanceof Error && error.message
+          ? `אירעה שגיאה במהלך השיחה: ${error.message}`
+          : "אירעה שגיאה במהלך השיחה.";
       setChatHistory((history) => [
         ...history,
-        { role: "assistant", content: "אירעה שגיאה במהלך השיחה." },
+        { role: "assistant", content: message },
       ]);
     } finally {
       setLoading(false);
