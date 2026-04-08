@@ -29,6 +29,7 @@ function App() {
   const [apiKey, setApiKey] = useState(
     () => localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) ?? "",
   );
+  const [showSavedFeedback, setShowSavedFeedback] = useState(false);
 
   useEffect(() => {
     invoke<number>("get_backend_port")
@@ -36,9 +37,10 @@ function App() {
       .catch(() => setBackendPort(null));
   }, []);
 
-  useEffect(() => {
+  const saveApiKey = () => {
     localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, apiKey);
-  }, [apiKey]);
+    setShowSavedFeedback(true);
+  };
 
   const toBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -113,13 +115,23 @@ function App() {
       <div className="chat-shell">
         <header className="header">⚖️ סוכן משפטי - דיני עבודה</header>
         <div className="composer">
-          <input
-            className="text-input"
-            type="password"
-            placeholder="Gemini API Key"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-          />
+          <div className="row api-key-row">
+            <input
+              className="text-input"
+              type="password"
+              placeholder="Gemini API Key"
+              value={apiKey}
+              onFocus={() => setShowSavedFeedback(false)}
+              onChange={(event) => {
+                setApiKey(event.target.value);
+                setShowSavedFeedback(false);
+              }}
+            />
+            <button type="button" onClick={saveApiKey} aria-label="שמור מפתח API">
+              שמור
+            </button>
+            {showSavedFeedback && <span className="saved-feedback">✅ נשמר</span>}
+          </div>
         </div>
         <main className="messages">
           {chatHistory.map((message, index) => (
