@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.lawagent.app",
   "build": {
-    "beforeDevCommand": "npm --prefix .. run dev",
-    "beforeBuildCommand": "npm --prefix .. run build",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:5173",
-    "distDir": "../dist"
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
@@ -23,7 +23,6 @@
     }
   },
   "bundle": {
-    "identifier": "com.lawagent.app",
     "externalBin": [
       "bin/python-backend"
     ],
