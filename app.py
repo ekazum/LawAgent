@@ -1,14 +1,13 @@
 import os
 
-import google.generativeai as genai
 import streamlit as st
+from google import genai
+from google.genai import types
 
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     st.error("משתנה הסביבה GEMINI_API_KEY אינו מוגדר. יש להגדיר אותו לפני הפעלת האפליקציה.")
     st.stop()
-
-genai.configure(api_key=api_key)
 
 SYSTEM_INSTRUCTION = (
     "You are an expert Israeli Employment Law Attorney and Senior Litigator. "
@@ -43,11 +42,28 @@ def search_legal_database(query: str) -> str:
     )
 
 
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro",
-    system_instruction=SYSTEM_INSTRUCTION,
-    tools=[search_legal_database],
-)
+def _to_genai_history(history: list[dict[str, str]]) -> list[types.Content]:
+    return [
+        types.Content(
+            role="model" if item["role"] == "assistant" else "user",
+            parts=[types.Part.from_text(text=item["content"])],
+        )
+        for item in history
+    ]
+
+
+def _create_chat(history: list[dict[str, str]]):
+    client = genai.Client(api_key=api_key)
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+        tools=[search_legal_database],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=False),
+    )
+    return client.chats.create(
+        model="gemini-2.5-pro",
+        config=config,
+        history=_to_genai_history(history),
+    )
 
 st.title("⚖️ סוכן משפטי - דיני עבודה")
 
@@ -66,48 +82,46 @@ with st.sidebar:
         key=f"evidence_uploader_{st.session_state.uploader_key}",
     )
 
-if "chat" not in st.session_state:
-    st.session_state.chat = model.start_chat(enable_automatic_function_calling=True)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-for message in st.session_state.chat.history:
-    role = "assistant" if message.role == "model" else "user"
-    with st.chat_message(role):
-        text_parts = []
-        for part in message.parts:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                text_parts.append(part_text)
-        if text_parts:
-            st.markdown("\n\n".join(text_parts))
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 prompt = st.chat_input("כתוב הוראות או שאלת המשך...")
 
 if prompt:
+    previous_messages = list(st.session_state.messages)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
     with st.chat_message("user"):
         st.markdown(prompt)
 
     try:
-        message_payload = [prompt]
+        message_payload: list[str | types.Part] = [prompt]
 
         if uploaded_file is not None:
             message_payload.append(
-                {
-                    "mime_type": uploaded_file.type or "application/octet-stream",
-                    "data": uploaded_file.getvalue(),
-                }
+                types.Part.from_bytes(
+                    data=uploaded_file.getvalue(),
+                    mime_type=uploaded_file.type or "application/octet-stream",
+                )
             )
 
         with st.spinner("מנתח ומנסח..."):
-            response = st.session_state.chat.send_message(message_payload)
+            chat_session = _create_chat(previous_messages)
+            response = chat_session.send_message(message_payload)
+
+        assistant_text = response.text or "לא התקבלה תשובה מהמודל. אנא נסה שנית."
+        st.session_state.messages.append({"role": "assistant", "content": assistant_text})
 
         with st.chat_message("assistant"):
-            if response.text:
-                st.markdown(response.text)
-            else:
-                st.error("לא התקבלה תשובה מהמודל. אנא נסה שנית.")
+            st.markdown(assistant_text)
 
         if uploaded_file is not None:
             st.session_state.uploader_key += 1
             st.rerun()
     except Exception as e:
+        st.session_state.messages = previous_messages
         st.error(f"אירעה שגיאה במהלך השיחה: {e}")

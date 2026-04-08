@@ -3,9 +3,10 @@ import base64
 import os
 from typing import List, Literal, Optional
 
-import google.generativeai as genai
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
 
 SYSTEM_INSTRUCTION = (
@@ -71,12 +72,12 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _to_gemini_history(history: List[ChatMessage]) -> list[dict]:
+def _to_genai_history(history: List[ChatMessage]) -> list[types.Content]:
     return [
-        {
-            "role": "model" if item.role == "assistant" else "user",
-            "parts": [{"text": item.content}],
-        }
+        types.Content(
+            role="model" if item.role == "assistant" else "user",
+            parts=[types.Part.from_text(text=item.content)],
+        )
         for item in history
     ]
 
@@ -88,24 +89,27 @@ def chat(req: ChatRequest, x_api_key: str = Header(...)) -> ChatResponse:
         if not api_key:
             raise HTTPException(status_code=400, detail="X-API-Key header is required")
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-pro",
+        client = genai.Client(api_key=api_key)
+        chat_config = types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             tools=[search_legal_database],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=False
+            ),
         )
-        chat_session = model.start_chat(
-            history=_to_gemini_history(req.history),
-            enable_automatic_function_calling=True,
+        chat_session = client.chats.create(
+            model="gemini-2.5-pro",
+            config=chat_config,
+            history=_to_genai_history(req.history),
         )
 
-        payload: list = [req.message]
+        payload: list[str | types.Part] = [req.message]
         if req.file:
             payload.append(
-                {
-                    "mime_type": req.file.mime_type or "application/octet-stream",
-                    "data": base64.b64decode(req.file.data_base64),
-                }
+                types.Part.from_bytes(
+                    data=base64.b64decode(req.file.data_base64),
+                    mime_type=req.file.mime_type or "application/octet-stream",
+                )
             )
 
         response = chat_session.send_message(payload)
