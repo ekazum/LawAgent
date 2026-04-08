@@ -81,7 +81,8 @@ function App() {
 
       setChatHistory((data as ChatApiResponse).history);
       setSelectedFile(null);
-    } catch {
+    } catch (error) {
+      console.error(error);
       setChatHistory((history) => [
         ...history,
         { role: "assistant", content: "אירעה שגיאה במהלך השיחה." },
