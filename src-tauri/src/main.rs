@@ -13,7 +13,13 @@ fn get_backend_port(state: tauri::State<BackendState>) -> Result<u16, String> {
 }
 
 fn main() {
-    let backend_port: u16 = 8000;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("failed to bind to an available localhost port");
+    let backend_port = listener
+        .local_addr()
+        .expect("failed to read allocated localhost port")
+        .port();
+    drop(listener);
 
     tauri::Builder::default()
         .manage(BackendState {
