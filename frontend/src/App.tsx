@@ -18,18 +18,27 @@ type ChatApiResponse = {
   history: ChatMessage[];
 };
 
+const GEMINI_API_KEY_STORAGE_KEY = "gemini_api_key";
+
 function App() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [currentInput, setCurrentInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [backendPort, setBackendPort] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [apiKey, setApiKey] = useState(
+    () => localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) ?? "",
+  );
 
   useEffect(() => {
     invoke<number>("get_backend_port")
       .then(setBackendPort)
       .catch(() => setBackendPort(null));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, apiKey);
+  }, [apiKey]);
 
   const toBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -43,7 +52,7 @@ function App() {
     });
 
   const sendMessage = async () => {
-    if (!currentInput.trim() || !backendPort || loading) return;
+    if (!currentInput.trim() || !backendPort || loading || !apiKey.trim()) return;
 
     const userMessage: ChatMessage = { role: "user", content: currentInput };
     const prevHistory = [...chatHistory];
@@ -64,7 +73,10 @@ function App() {
 
       const response = await fetch(`http://127.0.0.1:${backendPort}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey.trim(),
+        },
         body: JSON.stringify({
           message: userMessage.content,
           history: prevHistory,
@@ -100,6 +112,15 @@ function App() {
     <div className="app">
       <div className="chat-shell">
         <header className="header">⚖️ סוכן משפטי - דיני עבודה</header>
+        <div className="composer">
+          <input
+            className="text-input"
+            type="password"
+            placeholder="Gemini API Key"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+        </div>
         <main className="messages">
           {chatHistory.map((message, index) => (
             <div
@@ -124,7 +145,10 @@ function App() {
               onChange={(event) => setCurrentInput(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && void sendMessage()}
             />
-            <button onClick={() => void sendMessage()} disabled={loading || !backendPort}>
+            <button
+              onClick={() => void sendMessage()}
+              disabled={loading || !backendPort || !apiKey.trim()}
+            >
               {loading ? "מנתח..." : "שלח"}
             </button>
           </div>

@@ -5,14 +5,8 @@ from typing import List, Literal, Optional
 
 import google.generativeai as genai
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY is not set")
-
-genai.configure(api_key=api_key)
 
 SYSTEM_INSTRUCTION = (
     "You are an expert Israeli Employment Law Attorney and Senior Litigator. "
@@ -45,13 +39,6 @@ def search_legal_database(query: str) -> str:
         "תקדים מדומה: בתי הדין לעבודה מדגישים כי יש לבחון את מכלול נסיבות יחסי העבודה, "
         "חובת תום הלב, והמסגרת הראייתית לפני קביעת זכויות כספיות וסעדים."
     )
-
-
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro",
-    system_instruction=SYSTEM_INSTRUCTION,
-    tools=[search_legal_database],
-)
 
 
 class ChatMessage(BaseModel):
@@ -95,8 +82,18 @@ def _to_gemini_history(history: List[ChatMessage]) -> list[dict]:
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, x_api_key: str = Header(...)) -> ChatResponse:
     try:
+        api_key = x_api_key.strip()
+        if not api_key:
+            raise HTTPException(status_code=400, detail="X-API-Key header is required")
+
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-pro",
+            system_instruction=SYSTEM_INSTRUCTION,
+            tools=[search_legal_database],
+        )
         chat_session = model.start_chat(
             history=_to_gemini_history(req.history),
             enable_automatic_function_calling=True,
@@ -133,4 +130,4 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = parser.parse_args()
-    uvicorn.run("main:app", host=args.host, port=args.port, reload=False)
+    uvicorn.run(app, host=args.host, port=args.port, reload=False)
