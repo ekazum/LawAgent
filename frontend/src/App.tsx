@@ -87,6 +87,7 @@ function App() {
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<"chat" | "documents">("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [apiKey, setApiKey] = useState(
     () => localStorage.getItem(API_KEY_STORAGE_KEY) ?? "",
   );
@@ -129,6 +130,7 @@ function App() {
     setActiveId(null);
     setChatHistory([]);
     setSelectedTemplate(null);
+    setSidebarOpen(false);
   };
 
   const openConversation = async (id: number) => {
@@ -136,6 +138,7 @@ function App() {
     setActiveId(id);
     setSelectedTemplate(null);
     setView("chat");
+    setSidebarOpen(false);
     try {
       const response = await fetch(`${API_URL}/api/conversations/${id}/messages`);
       setChatHistory(response.ok ? ((await response.json()) as ChatMessage[]) : []);
@@ -292,7 +295,10 @@ function App() {
   return (
     <div className="app">
       <div className="layout">
-        <aside className="sidebar">
+        {sidebarOpen && (
+          <div className="backdrop" onClick={() => setSidebarOpen(false)} />
+        )}
+        <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <button className="new-chat" onClick={newConversation} disabled={loading}>
             + שיחה חדשה
           </button>
@@ -320,7 +326,14 @@ function App() {
         </aside>
         <div className="chat-shell">
           <header className="header">
-            <span>⚖️ סוכן משפטי - דיני עבודה</span>
+            <button
+              className="menu-btn"
+              aria-label="שיחות קודמות"
+              onClick={() => setSidebarOpen((open) => !open)}
+            >
+              ☰
+            </button>
+            <span className="header-title">⚖️ סוכן משפטי - דיני עבודה</span>
             <nav className="tabs">
               <button
                 className={`tab ${view === "chat" ? "active" : ""}`}
