@@ -1,4 +1,9 @@
 fastapi
 uvicorn
-google-genai
-pyinstaller
+anthropic
+sentence-transformers
+psycopg[binary]
+psycopg-pool
+pypdf
+python-docx
+python-multipart
