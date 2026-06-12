@@ -25,7 +25,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   precedent: "תקדים",
 };
 
-function DocumentsPanel({ apiKey }: { apiKey: string }) {
+function DocumentsPanel() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -88,14 +88,8 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
       form.append("doc_type", docType);
       form.append("category", uploadCategory);
 
-      const headers: Record<string, string> = {};
-      if (apiKey.trim()) {
-        headers["X-API-Key"] = apiKey.trim();
-      }
-
       const response = await apiFetch("/api/documents", {
         method: "POST",
-        headers,
         body: form,
       });
       const data = await response.json();

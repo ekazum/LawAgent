@@ -40,8 +40,6 @@ type StreamEvent =
   | { type: "error"; detail: string }
   | { type: "done"; conversation_id: number | null };
 
-const API_KEY_STORAGE_KEY = "anthropic_api_key";
-
 function extractText(node: ReactNode): string | null {
   if (typeof node === "string") return node;
   if (Array.isArray(node) && node.length === 1 && typeof node[0] === "string") {
@@ -98,10 +96,6 @@ function App() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
-  const [apiKey, setApiKey] = useState(
-    () => localStorage.getItem(API_KEY_STORAGE_KEY) ?? "",
-  );
-  const [showSavedFeedback, setShowSavedFeedback] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const refreshConversations = useCallback(async () => {
@@ -171,11 +165,6 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, streamingText, statusText]);
-
-  const saveApiKey = () => {
-    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
-    setShowSavedFeedback(true);
-  };
 
   const newConversation = () => {
     if (loading) return;
@@ -255,16 +244,9 @@ function App() {
         };
       }
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (apiKey.trim()) {
-        headers["X-API-Key"] = apiKey.trim();
-      }
-
       const response = await apiFetch("/api/chat", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: messageText,
           conversation_id: activeId,
@@ -429,26 +411,7 @@ function App() {
               </button>
             </nav>
           </header>
-          <div className="composer">
-            <div className="row api-key-row">
-              <input
-                className="text-input"
-                type="password"
-                placeholder="Anthropic API Key (לא נדרש אם מוגדר בשרת)"
-                value={apiKey}
-                onFocus={() => setShowSavedFeedback(false)}
-                onChange={(event) => {
-                  setApiKey(event.target.value);
-                  setShowSavedFeedback(false);
-                }}
-              />
-              <button type="button" onClick={saveApiKey} aria-label="שמור מפתח API">
-                שמור
-              </button>
-              {showSavedFeedback && <span className="saved-feedback">✅ נשמר</span>}
-            </div>
-          </div>
-          {view === "documents" && <DocumentsPanel apiKey={apiKey} />}
+          {view === "documents" && <DocumentsPanel />}
           {view === "chat" && (
             <>
               <main className="messages">
