@@ -389,6 +389,33 @@ button.danger {
   flex: initial;
 }
 
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(90vw, 340px);
+  padding: 2rem 1.5rem;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  direction: rtl;
+}
+
+.login-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
 @media (max-width: 768px) {
   .app {
     padding: 0;

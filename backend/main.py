@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import base64
 import json
 import logging
@@ -9,11 +10,12 @@ from typing import Any, Iterator, List, Optional
 
 import anthropic
 import uvicorn
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import auth
 import db
 from constants import (
     CHAT_MODEL,
@@ -34,6 +36,7 @@ from schemas import (
     DocumentInfo,
     DocumentUpdate,
     FileInput,
+    LoginRequest,
     TemplateInfo,
 )
 from templates import TEMPLATES, template_context
@@ -92,6 +95,24 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Open endpoints: login itself, the auth probe, and /health (docker healthcheck).
+_AUTH_EXEMPT_PATHS = {"/api/login", "/api/auth/status"}
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    path = request.url.path
+    if (
+        auth.password_configured()
+        and path.startswith("/api")
+        and path not in _AUTH_EXEMPT_PATHS
+    ):
+        token = request.headers.get("X-Session-Token", "")
+        if not auth.verify_token(token):
+            return JSONResponse({"detail": "נדרשת התחברות"}, status_code=401)
+    return await call_next(request)
+
+
 # noinspection PyTypeChecker
 app.add_middleware(
     CORSMiddleware,
@@ -119,6 +140,19 @@ def _resolve_api_key(x_api_key: Optional[str]) -> str:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/auth/status")
+def auth_status() -> dict[str, bool]:
+    return {"required": auth.password_configured()}
+
+
+@app.post("/api/login")
+async def login(request: LoginRequest) -> dict[str, str]:
+    if not auth.verify_password(request.password):
+        await asyncio.sleep(1)  # slow down brute-force attempts
+        raise HTTPException(status_code=401, detail="סיסמה שגויה")
+    return {"token": auth.issue_token()}
 
 
 @app.get("/api/templates", response_model=List[TemplateInfo])

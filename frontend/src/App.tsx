@@ -3,7 +3,11 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import DocumentsPanel from "./DocumentsPanel";
-import { API_URL } from "./config";
+import {
+  apiFetch,
+  SESSION_STORAGE_KEY,
+  UNAUTHORIZED_EVENT,
+} from "./config";
 import "./App.css";
 
 type ChatMessage = {
@@ -88,6 +92,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<"chat" | "documents">("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [authState, setAuthState] = useState<"checking" | "login" | "ready">(
+    "checking",
+  );
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginBusy, setLoginBusy] = useState(false);
   const [apiKey, setApiKey] = useState(
     () => localStorage.getItem(API_KEY_STORAGE_KEY) ?? "",
   );
@@ -96,7 +106,7 @@ function App() {
 
   const refreshConversations = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/conversations`);
+      const response = await apiFetch("/api/conversations");
       if (response.ok) {
         setConversations((await response.json()) as ConversationInfo[]);
       }
@@ -106,15 +116,57 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void refreshConversations();
-  }, [refreshConversations]);
+    apiFetch("/api/auth/status")
+      .then((response) => response.json())
+      .then(({ required }: { required: boolean }) => {
+        if (!required || localStorage.getItem(SESSION_STORAGE_KEY)) {
+          setAuthState("ready");
+        } else {
+          setAuthState("login");
+        }
+      })
+      .catch(() => setAuthState("ready"));
+  }, []);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/templates`)
+    const onUnauthorized = () => setAuthState("login");
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  useEffect(() => {
+    if (authState !== "ready") return;
+    void refreshConversations();
+    apiFetch("/api/templates")
       .then((response) => response.json())
       .then((data) => setTemplates(data as TemplateInfo[]))
       .catch(() => {});
-  }, []);
+  }, [authState, refreshConversations]);
+
+  const submitLogin = async () => {
+    if (!loginPassword || loginBusy) return;
+    setLoginBusy(true);
+    setLoginError(null);
+    try {
+      const response = await apiFetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: loginPassword }),
+      });
+      if (response.ok) {
+        const { token } = (await response.json()) as { token: string };
+        localStorage.setItem(SESSION_STORAGE_KEY, token);
+        setLoginPassword("");
+        setAuthState("ready");
+      } else {
+        setLoginError("סיסמה שגויה");
+      }
+    } catch {
+      setLoginError("שגיאה בהתחברות לשרת");
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -140,7 +192,7 @@ function App() {
     setView("chat");
     setSidebarOpen(false);
     try {
-      const response = await fetch(`${API_URL}/api/conversations/${id}/messages`);
+      const response = await apiFetch(`/api/conversations/${id}/messages`);
       setChatHistory(response.ok ? ((await response.json()) as ChatMessage[]) : []);
     } catch {
       setChatHistory([]);
@@ -150,7 +202,7 @@ function App() {
   const removeConversation = async (id: number) => {
     if (loading) return;
     try {
-      await fetch(`${API_URL}/api/conversations/${id}`, { method: "DELETE" });
+      await apiFetch(`/api/conversations/${id}`, { method: "DELETE" });
     } catch {
       // ignore
     }
@@ -210,7 +262,7 @@ function App() {
         headers["X-API-Key"] = apiKey.trim();
       }
 
-      const response = await fetch(`${API_URL}/api/chat`, {
+      const response = await apiFetch("/api/chat", {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -291,6 +343,34 @@ function App() {
       setLoading(false);
     }
   };
+
+  if (authState !== "ready") {
+    return (
+      <div className="app login-screen">
+        {authState === "login" && (
+          <div className="login-card">
+            <div className="login-title">⚖️ סוכן משפטי - דיני עבודה</div>
+            <input
+              className="text-input"
+              type="password"
+              placeholder="סיסמה"
+              value={loginPassword}
+              autoFocus
+              onChange={(event) => {
+                setLoginPassword(event.target.value);
+                setLoginError(null);
+              }}
+              onKeyDown={(event) => event.key === "Enter" && void submitLogin()}
+            />
+            <button onClick={() => void submitLogin()} disabled={loginBusy}>
+              {loginBusy ? "מתחבר..." : "כניסה"}
+            </button>
+            {loginError && <span className="error-text">{loginError}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="app">

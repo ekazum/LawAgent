@@ -3,6 +3,10 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class LoginRequest(BaseModel):
+    password: str
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str

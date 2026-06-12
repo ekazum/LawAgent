@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { API_URL } from "./config";
+import { apiFetch } from "./config";
 
 type DocumentInfo = {
   id: number;
@@ -43,7 +43,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
       const query = filterCategory
         ? `?category=${encodeURIComponent(filterCategory)}`
         : "";
-      const response = await fetch(`${API_URL}/api/documents${query}`);
+      const response = await apiFetch(`/api/documents${query}`);
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.detail ?? "Request failed");
@@ -61,7 +61,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
 
   const refreshCategories = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/categories`);
+      const response = await apiFetch("/api/categories");
       if (response.ok) {
         setCategories((await response.json()) as CategoryInfo[]);
       }
@@ -93,7 +93,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
         headers["X-API-Key"] = apiKey.trim();
       }
 
-      const response = await fetch(`${API_URL}/api/documents`, {
+      const response = await apiFetch("/api/documents", {
         method: "POST",
         headers,
         body: form,
@@ -121,7 +121,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${API_URL}/api/documents/${id}`, {
+      const response = await apiFetch(`/api/documents/${id}`, {
         method: "DELETE",
       });
       if (!response.ok && response.status !== 404) {
@@ -145,7 +145,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
     fields: Partial<Pick<DocumentInfo, "doc_type" | "category">>,
   ) => {
     try {
-      const response = await fetch(`${API_URL}/api/documents/${id}`, {
+      const response = await apiFetch(`/api/documents/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(fields),
@@ -168,7 +168,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
     const name = newCategory.trim();
     if (!name) return;
     try {
-      const response = await fetch(`${API_URL}/api/categories`, {
+      const response = await apiFetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -190,7 +190,7 @@ function DocumentsPanel({ apiKey }: { apiKey: string }) {
 
   const removeCategory = async (id: number) => {
     try {
-      await fetch(`${API_URL}/api/categories/${id}`, { method: "DELETE" });
+      await apiFetch(`/api/categories/${id}`, { method: "DELETE" });
       await refreshCategories();
       await refresh();
     } catch {
