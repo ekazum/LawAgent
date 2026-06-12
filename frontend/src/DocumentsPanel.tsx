@@ -28,7 +28,8 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 function DocumentsPanel() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [docType, setDocType] = useState("auto");
   const [uploadCategory, setUploadCategory] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -79,33 +80,45 @@ function DocumentsPanel() {
   }, [refreshCategories]);
 
   const upload = async () => {
-    if (!selectedFile || busy) return;
+    if (selectedFiles.length === 0 || busy) return;
     setBusy(true);
     setError(null);
+    const failures: string[] = [];
     try {
-      const form = new FormData();
-      form.append("file", selectedFile);
-      form.append("doc_type", docType);
-      form.append("category", uploadCategory);
+      for (const [index, file] of selectedFiles.entries()) {
+        setUploadProgress(`מעלה ${index + 1} מתוך ${selectedFiles.length}...`);
+        try {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("doc_type", docType);
+          form.append("category", uploadCategory);
 
-      const response = await apiFetch("/api/documents", {
-        method: "POST",
-        body: form,
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail ?? "Upload failed");
+          const response = await apiFetch("/api/documents", {
+            method: "POST",
+            body: form,
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.detail ?? "Upload failed");
+          }
+        } catch (uploadError) {
+          failures.push(
+            `${file.name}: ${
+              uploadError instanceof Error && uploadError.message
+                ? uploadError.message
+                : "שגיאה בהעלאה"
+            }`,
+          );
+        }
       }
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setFileInputKey((key) => key + 1);
       await refresh();
-    } catch (uploadError) {
-      setError(
-        uploadError instanceof Error && uploadError.message
-          ? uploadError.message
-          : "שגיאה בהעלאת המסמך.",
-      );
+      if (failures.length > 0) {
+        setError(`חלק מהקבצים לא הועלו — ${failures.join(" | ")}`);
+      }
     } finally {
+      setUploadProgress(null);
       setBusy(false);
     }
   };
@@ -198,8 +211,11 @@ function DocumentsPanel() {
         <input
           key={fileInputKey}
           type="file"
+          multiple
           accept=".pdf,.docx,.txt,.md"
-          onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+          onChange={(event) =>
+            setSelectedFiles(Array.from(event.target.files ?? []))
+          }
         />
         <select
           value={docType}
@@ -225,8 +241,16 @@ function DocumentsPanel() {
             </option>
           ))}
         </select>
-        <button onClick={() => void upload()} disabled={busy || !selectedFile}>
-          {busy ? "מעבד..." : "העלה למאגר"}
+        <button
+          onClick={() => void upload()}
+          disabled={busy || selectedFiles.length === 0}
+        >
+          {uploadProgress ??
+            (busy
+              ? "מעבד..."
+              : selectedFiles.length > 1
+                ? `העלה ${selectedFiles.length} קבצים`
+                : "העלה למאגר")}
         </button>
       </div>
       <div className="upload-row">
