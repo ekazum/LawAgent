@@ -103,12 +103,12 @@ _AUTH_EXEMPT_PATHS = {"/api/login", "/api/auth/status"}
 async def require_session(request: Request, call_next):
     path = request.url.path
     if (
-        auth.password_configured()
+        auth.auth_required()
         and path.startswith("/api")
         and path not in _AUTH_EXEMPT_PATHS
     ):
         token = request.headers.get("X-Session-Token", "")
-        if not auth.verify_token(token):
+        if auth.verify_token(token) is None:
             return JSONResponse({"detail": "נדרשת התחברות"}, status_code=401)
     return await call_next(request)
 
@@ -144,15 +144,15 @@ def health() -> dict[str, str]:
 
 @app.get("/api/auth/status")
 def auth_status() -> dict[str, bool]:
-    return {"required": auth.password_configured()}
+    return {"required": auth.auth_required()}
 
 
 @app.post("/api/login")
 async def login(request: LoginRequest) -> dict[str, str]:
-    if not auth.verify_password(request.password):
+    if not auth.verify_credentials(request.username, request.password):
         await asyncio.sleep(1)  # slow down brute-force attempts
-        raise HTTPException(status_code=401, detail="סיסמה שגויה")
-    return {"token": auth.issue_token()}
+        raise HTTPException(status_code=401, detail="שם משתמש או סיסמה שגויים")
+    return {"token": auth.issue_token(request.username)}
 
 
 @app.get("/api/templates", response_model=List[TemplateInfo])

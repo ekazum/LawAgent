@@ -93,6 +93,7 @@ function App() {
   const [authState, setAuthState] = useState<"checking" | "login" | "ready">(
     "checking",
   );
+  const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -138,14 +139,17 @@ function App() {
   }, [authState, refreshConversations]);
 
   const submitLogin = async () => {
-    if (!loginPassword || loginBusy) return;
+    if (!loginUsername.trim() || !loginPassword || loginBusy) return;
     setLoginBusy(true);
     setLoginError(null);
     try {
       const response = await apiFetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: loginPassword }),
+        body: JSON.stringify({
+          username: loginUsername.trim(),
+          password: loginPassword,
+        }),
       });
       if (response.ok) {
         const { token } = (await response.json()) as { token: string };
@@ -153,7 +157,7 @@ function App() {
         setLoginPassword("");
         setAuthState("ready");
       } else {
-        setLoginError("סיסמה שגויה");
+        setLoginError("שם משתמש או סיסמה שגויים");
       }
     } catch {
       setLoginError("שגיאה בהתחברות לשרת");
@@ -334,10 +338,22 @@ function App() {
             <div className="login-title">⚖️ סוכן משפטי - דיני עבודה</div>
             <input
               className="text-input"
+              type="text"
+              placeholder="שם משתמש"
+              autoComplete="username"
+              value={loginUsername}
+              autoFocus
+              onChange={(event) => {
+                setLoginUsername(event.target.value);
+                setLoginError(null);
+              }}
+            />
+            <input
+              className="text-input"
               type="password"
               placeholder="סיסמה"
+              autoComplete="current-password"
               value={loginPassword}
-              autoFocus
               onChange={(event) => {
                 setLoginPassword(event.target.value);
                 setLoginError(null);
