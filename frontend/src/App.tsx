@@ -84,7 +84,8 @@ function App() {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [currentInput, setCurrentInput] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -239,13 +240,13 @@ function App() {
     };
 
     try {
-      let filePayload: FilePayload | undefined;
-      if (selectedFile) {
-        filePayload = {
-          mime_type: selectedFile.type || "application/octet-stream",
-          data_base64: await toBase64(selectedFile),
-          name: selectedFile.name,
-        };
+      const filePayloads: FilePayload[] = [];
+      for (const file of selectedFiles) {
+        filePayloads.push({
+          mime_type: file.type || "application/octet-stream",
+          data_base64: await toBase64(file),
+          name: file.name,
+        });
       }
 
       const response = await apiFetch("/api/chat", {
@@ -255,7 +256,7 @@ function App() {
           message: messageText,
           conversation_id: activeId,
           template,
-          file: filePayload,
+          files: filePayloads.length > 0 ? filePayloads : undefined,
         }),
       });
 
@@ -316,7 +317,8 @@ function App() {
         finishWith(accumulated || "החיבור לשרת נותק באמצע התשובה.");
       }
 
-      setSelectedFile(null);
+      setSelectedFiles([]);
+      setFileInputKey((key) => key + 1);
       void refreshConversations();
     } catch (error) {
       console.error(error);
@@ -469,10 +471,12 @@ function App() {
                   ))}
                 </div>
                 <input
+                  key={fileInputKey}
                   type="file"
+                  multiple
                   accept=".pdf,.txt,.png,.jpg,.jpeg"
                   onChange={(event) =>
-                    setSelectedFile(event.target.files?.[0] ?? null)
+                    setSelectedFiles(Array.from(event.target.files ?? []))
                   }
                 />
                 <div className="row">

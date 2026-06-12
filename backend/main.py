@@ -447,9 +447,9 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
             instruction += "\n\nמקורות רלוונטיים שאותרו במאגר הידע:\n\n" + context
         user_blocks.append({"type": "text", "text": instruction})
     user_blocks.append({"type": "text", "text": req.message})
-    if req.file:
+    for attached in req.all_files:
         try:
-            user_blocks.append(_file_content_block(req.file))
+            user_blocks.append(_file_content_block(attached))
         except UnsupportedFileError as error:
             yield _sse({"type": "error", "detail": str(error)})
             return

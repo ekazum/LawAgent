@@ -23,7 +23,15 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: Optional[int] = None
     template: Optional[str] = None
-    file: Optional[FileInput] = None
+    file: Optional[FileInput] = None  # kept for older clients
+    files: Optional[List[FileInput]] = None
+
+    @property
+    def all_files(self) -> List[FileInput]:
+        combined = list(self.files or [])
+        if self.file:
+            combined.append(self.file)
+        return combined
 
 
 class DocumentInfo(BaseModel):
