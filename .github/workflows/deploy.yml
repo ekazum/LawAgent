@@ -1,0 +1,61 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  VM_HOST: "34.165.50.223"
+  VM_USER: "Eli"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Syntax-check backend
+        run: python -m compileall -q backend
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: git archive --format=tar.gz -o lawagent.tar.gz HEAD
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+      - name: Deploy to VM
+        run: |
+          scp lawagent.tar.gz deploy/deploy.sh "$VM_USER@$VM_HOST:"
+          ssh "$VM_USER@$VM_HOST" 'chmod +x ~/deploy.sh && ~/deploy.sh'
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 15); do
+            if curl -fsS --max-time 8 https://anat-lawagent.duckdns.org/health | grep -q ok; then
+              echo "healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "health check failed" >&2; exit 1
