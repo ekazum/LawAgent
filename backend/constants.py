@@ -1,4 +1,4 @@
-CHAT_MODEL = "claude-haiku-4-5"
+CHAT_MODEL = "claude-sonnet-4-6"
 MAX_RESPONSE_TOKENS = 32000
 MAX_TOOL_ITERATIONS = 8
 
