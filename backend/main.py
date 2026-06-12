@@ -4,13 +4,15 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Iterator, List, Optional
+from pathlib import Path
+from typing import Any, Iterator, List, Optional
 
 import anthropic
 import uvicorn
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import db
 from constants import (
@@ -58,11 +60,12 @@ def classify_document(
         "אם זהו פסק דין, חלץ גם: מספר הליך, ערכאה, שמות הצדדים ותאריך ההחלטה.\n\n"
         f"--- תחילת המסמך ---\n{text[:6000]}"
     )
+    classification_messages: list[Any] = [{"role": "user", "content": prompt}]
     try:
         response = client.messages.parse(
             model=CHAT_MODEL,
             max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
+            messages=classification_messages,
             output_format=DocumentClassification,
         )
         classification = response.parsed_output
@@ -89,6 +92,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# noinspection PyTypeChecker
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv(
@@ -158,6 +162,7 @@ async def upload_document(
     if final_type is None or final_category is None:
         api_key = (x_api_key or os.getenv("ANTHROPIC_API_KEY") or "").strip()
         if api_key:
+            # noinspection PyBroadException
             try:
                 category_names = [item["name"] for item in db.list_categories()]
             except Exception:
@@ -367,6 +372,14 @@ def _sse(payload: dict) -> str:
 
 def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
     template = TEMPLATES.get(req.template) if req.template else None
+    if template is not None:
+        template_label: Optional[str] = template["label"]
+        template_instruction: Optional[str] = template["instruction"]
+        template_doc_types: list[str] = template["doc_types"]
+    else:
+        template_label = None
+        template_instruction = None
+        template_doc_types = []
 
     # Resolve conversation + history. If the DB is down, chat still works
     # statelessly — the conversation just isn't persisted.
@@ -381,7 +394,7 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
                 return
             history = stored
         else:
-            prefix = f"[{template['label']}] " if template else ""
+            prefix = f"[{template_label}] " if template_label else ""
             title = (prefix + req.message).strip()[:80]
             conversation_id = db.create_conversation(title)["id"]
     except Exception as error:
@@ -392,10 +405,10 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
     yield _sse({"type": "start", "conversation_id": conversation_id})
 
     user_blocks: list[dict] = []
-    if template:
+    if template_instruction is not None:
         yield _sse({"type": "status", "text": "שולף מקורות רלוונטיים מהמאגר..."})
-        context = template_context(req.message, template["doc_types"])
-        instruction = template["instruction"]
+        context = template_context(req.message, template_doc_types)
+        instruction = template_instruction
         if context:
             instruction += "\n\nמקורות רלוונטיים שאותרו במאגר הידע:\n\n" + context
         user_blocks.append({"type": "text", "text": instruction})
@@ -407,17 +420,18 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
             yield _sse({"type": "error", "detail": str(error)})
             return
 
-    messages: list[dict] = [
+    messages: list[Any] = [
         {"role": item["role"], "content": item["content"]} for item in history
     ]
     messages.append({"role": "user", "content": user_blocks})
 
     client = anthropic.Anthropic(api_key=api_key)
+    # noinspection PyBroadException
     try:
         category_names = [item["name"] for item in db.list_categories()]
     except Exception:
         category_names = []
-    chat_tools = build_chat_tools(category_names)
+    chat_tools: list[Any] = build_chat_tools(category_names)
 
     collected: list[str] = []
     response = None
@@ -503,7 +517,8 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
         yield _sse({"type": "delta", "text": sources_text})
 
     final_text = "".join(collected).strip()
-    if response is not None and response.stop_reason == "refusal" and not final_text:
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason == "refusal" and not final_text:
         final_text = "הבקשה נדחתה משיקולי בטיחות. נסח את הפנייה מחדש."
         yield _sse({"type": "delta", "text": final_text})
     if not final_text:
@@ -512,8 +527,8 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
 
     if persist and conversation_id is not None:
         stored_user = req.message
-        if template:
-            stored_user = f"[{template['label']}]\n{stored_user}"
+        if template_label:
+            stored_user = f"[{template_label}]\n{stored_user}"
         if req.file and req.file.name:
             stored_user += f"\n[צורף קובץ: {req.file.name}]"
         try:
@@ -536,6 +551,15 @@ def chat(
         _chat_stream(req, api_key),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# Serve the built frontend when present (Docker image copies it to ./static).
+# Mounted last so API routes above always win; absent in dev mode.
+_static_dir = Path(os.getenv("FRONTEND_DIST") or Path(__file__).parent / "static")
+if _static_dir.is_dir():
+    app.mount(
+        "/", StaticFiles(directory=str(_static_dir), html=True), name="frontend"
     )
 
 

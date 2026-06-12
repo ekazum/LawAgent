@@ -10,7 +10,19 @@ Web-based legal assistant for Israeli employment law.
 - `docker-compose.yml` - Postgres + pgvector for the knowledge base.
 - `app.py` - Original Streamlit implementation (kept for reference).
 
-## Run locally
+## Run with Docker (recommended)
+
+```powershell
+copy .env.example .env   # then put your ANTHROPIC_API_KEY in .env
+docker compose up -d --build
+```
+
+Open http://localhost:8000 — the backend container serves both the UI and the
+API. The stack (app + database) restarts automatically after reboots.
+The first build takes several minutes (PyTorch + the embedding model are baked
+into the image, ~3GB).
+
+## Run in development mode
 
 ### 1. Database (Postgres + pgvector)
 

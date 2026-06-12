@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import db
 from ingestion import embed_query
@@ -6,7 +7,7 @@ from tools import format_chunks
 
 logger = logging.getLogger("lawagent")
 
-TEMPLATES = {
+TEMPLATES: dict[str, dict[str, Any]] = {
     "pleading": {
         "label": "טיוטת כתב טענות",
         "description": "ניסוח טיוטת כתב תביעה או כתב הגנה לבית הדין לעבודה על בסיס עובדות המקרה",
