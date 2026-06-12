@@ -1,0 +1,7 @@
+{
+	email ekazum@gmail.com
+}
+
+anat-lawagent.duckdns.org {
+	reverse_proxy app:8000
+}

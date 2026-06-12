@@ -36,5 +36,24 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # HTTPS reverse proxy — cloud only (docker compose --profile cloud up).
+  # Local runs skip it and serve plain http://localhost:8000 directly.
+  caddy:
+    image: caddy:2-alpine
+    container_name: lawagent-caddy
+    profiles: ["cloud"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
