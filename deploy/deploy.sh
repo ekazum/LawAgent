@@ -6,8 +6,10 @@ cd "$HOME"
 mkdir -p lawagent
 [ -f lawagent.tar.gz ] && tar xzf lawagent.tar.gz -C lawagent
 cd lawagent
+# app-users holds bcrypt hashes ('$'-laden); base64 it so compose's ${VAR}
+# interpolation passes it through verbatim (raw '$' would be mangled to empty).
 sudo ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret anthropic-api-key)" \
-     APP_USERS="$(gcloud secrets versions access latest --secret app-users)" \
+     APP_USERS_B64="$(gcloud secrets versions access latest --secret app-users | base64 -w0)" \
      docker compose --profile cloud up -d --build "$@"
 
 # compose won't recreate caddy when only the bind-mounted Caddyfile content

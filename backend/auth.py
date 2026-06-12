@@ -1,10 +1,14 @@
 """Username+password login with signed session tokens.
 
-Users come from the APP_USERS env var: comma- or newline-separated
-"username:password" entries. Auth is active only when APP_USERS is set
-(cloud); without it every request passes through, so local development
-needs no login. The token signing key is derived from the raw user
-spec, so any change to it invalidates all existing sessions.
+Users come from APP_USERS_B64 (base64 of the user spec) or, as a
+fallback for direct env / local dev, APP_USERS. Either way the decoded
+spec is comma- or newline-separated "username:bcrypt-hash" entries.
+Base64 is used on the cloud path because bcrypt hashes contain '$',
+which Docker Compose's ${VAR} interpolation would otherwise mangle.
+Auth is active only when at least one user is configured; without any,
+every request passes through, so local development needs no login. The
+token signing key is derived from the raw user spec, so any change to
+it invalidates all existing sessions.
 """
 
 import base64
@@ -17,7 +21,18 @@ from typing import Optional
 
 import bcrypt
 
-APP_USERS_RAW = (os.getenv("APP_USERS") or "").strip()
+
+def _load_users_raw() -> str:
+    encoded = (os.getenv("APP_USERS_B64") or "").strip()
+    if encoded:
+        try:
+            return base64.b64decode(encoded).decode().strip()
+        except Exception:
+            return ""
+    return (os.getenv("APP_USERS") or "").strip()
+
+
+APP_USERS_RAW = _load_users_raw()
 SESSION_TTL_SECONDS = 30 * 24 * 3600
 
 _SIGNING_KEY = hashlib.sha256(("lawagent-session:" + APP_USERS_RAW).encode()).digest()

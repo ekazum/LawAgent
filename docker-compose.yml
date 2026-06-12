@@ -23,6 +23,8 @@ services:
     environment:
       DATABASE_URL: postgresql://lawagent:lawagent@db:5432/lawagent
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # base64 so bcrypt-hash '$' chars survive compose interpolation
+      APP_USERS_B64: ${APP_USERS_B64:-}
       APP_USERS: ${APP_USERS:-}
     ports:
       - "8000:8000"
