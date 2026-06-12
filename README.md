@@ -8,7 +8,6 @@ Web-based legal assistant for Israeli employment law.
 - `backend/requirements.txt` - Backend dependencies.
 - `frontend/` - React + TypeScript UI (Vite).
 - `docker-compose.yml` - Postgres + pgvector for the knowledge base.
-- `app.py` - Original Streamlit implementation (kept for reference).
 
 ## Run with Docker (recommended)
 

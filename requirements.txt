@@ -1,6 +1,2 @@
 # Web app backend dependencies
 -r backend/requirements.txt
-
-# Legacy Streamlit prototype (app.py) — kept for reference only
-streamlit==1.56.0
-google-genai==1.70.0
