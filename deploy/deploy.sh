@@ -11,6 +11,7 @@ sudo ANTHROPIC_API_KEY="$(gcloud secrets versions access latest --secret anthrop
      docker compose --profile cloud up -d --build "$@"
 
 # compose won't recreate caddy when only the bind-mounted Caddyfile content
-# changed, so reload it explicitly (fall back to a restart if reload fails).
-sudo docker compose --profile cloud exec -T caddy caddy reload --config /etc/caddy/Caddyfile \
-    || sudo docker compose --profile cloud restart caddy
+# changed, and `caddy reload` proved unreliable here, so force-recreate it.
+# The Let's Encrypt cert lives in the caddy_data volume, so this is cheap
+# (no re-issuance) — just a ~1s blip.
+sudo docker compose --profile cloud up -d --force-recreate caddy
