@@ -480,16 +480,22 @@ function App() {
                   }
                 />
                 <div className="row">
-                  <input
-                    className="text-input"
+                  <textarea
+                    className="text-input chat-textarea"
+                    rows={3}
                     placeholder={
                       selectedTemplate
                         ? "פרט את עובדות המקרה והחומר הרלוונטי..."
-                        : "כתוב הוראות או שאלת המשך..."
+                        : "כתוב הוראות או שאלת המשך... (Shift+Enter לשורה חדשה)"
                     }
                     value={currentInput}
                     onChange={(event) => setCurrentInput(event.target.value)}
-                    onKeyDown={(event) => event.key === "Enter" && void sendMessage()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendMessage();
+                      }
+                    }}
                   />
                   <button onClick={() => void sendMessage()} disabled={loading}>
                     {loading ? "מנתח..." : "שלח"}
