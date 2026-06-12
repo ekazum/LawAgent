@@ -7,3 +7,4 @@ psycopg-pool
 pypdf
 python-docx
 python-multipart
+bcrypt

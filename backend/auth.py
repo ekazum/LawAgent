@@ -15,18 +15,25 @@ import os
 import time
 from typing import Optional
 
+import bcrypt
+
 APP_USERS_RAW = (os.getenv("APP_USERS") or "").strip()
 SESSION_TTL_SECONDS = 30 * 24 * 3600
 
 _SIGNING_KEY = hashlib.sha256(("lawagent-session:" + APP_USERS_RAW).encode()).digest()
 
+# Compared against when a username is unknown so a failed login costs the same
+# whether or not the user exists (no username-enumeration timing oracle).
+_DUMMY_HASH = bcrypt.hashpw(b"dummy-password", bcrypt.gensalt())
+
 
 def _parse_users(raw: str) -> dict[str, str]:
+    """Maps username -> bcrypt hash. Entries are "username:$2b$..." lines."""
     users: dict[str, str] = {}
     for entry in raw.replace("\n", ",").split(","):
-        username, _, password = entry.strip().partition(":")
-        if username.strip() and password:
-            users[username.strip().lower()] = password
+        username, _, password_hash = entry.strip().partition(":")
+        if username.strip() and password_hash:
+            users[username.strip().lower()] = password_hash
     return users
 
 
@@ -38,8 +45,13 @@ def auth_required() -> bool:
 
 
 def verify_credentials(username: str, password: str) -> bool:
-    expected = _USERS.get(username.strip().lower())
-    return bool(expected) and hmac.compare_digest(password, expected)
+    stored = _USERS.get(username.strip().lower())
+    target = stored.encode() if stored else _DUMMY_HASH
+    try:
+        matched = bcrypt.checkpw(password.encode(), target)
+    except ValueError:
+        matched = False
+    return bool(stored) and matched
 
 
 def issue_token(username: str) -> str:
