@@ -3,6 +3,11 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Skip build/deploy for docs-only pushes (markdown anywhere, LICENSE).
+    # A push touching any non-doc file still deploys normally.
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
 
 concurrency:
   group: deploy
