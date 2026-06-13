@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 import auth
 import db
+from ratelimit import login_global_limiter, login_ip_limiter
 from constants import (
     CHAT_MODEL,
     DOC_TYPES,
@@ -147,12 +149,38 @@ def auth_status() -> dict[str, bool]:
     return {"required": auth.auth_required()}
 
 
+def _client_ip(request: Request) -> str:
+    # Caddy appends the real peer to the right of X-Forwarded-For, so the
+    # rightmost entry is trustworthy (a client can prepend fakes but not
+    # forge the proxy-added value). Falls back to the socket peer locally.
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+_RATE_LIMIT_DETAIL = "יותר מדי ניסיונות התחברות. נסו שוב בעוד מספר דקות."
+
+
 @app.post("/api/login")
-async def login(request: LoginRequest) -> dict[str, str]:
-    if not auth.verify_credentials(request.username, request.password):
-        await asyncio.sleep(1)  # slow down brute-force attempts
+async def login(http_request: Request, credentials: LoginRequest) -> dict[str, str]:
+    now = time.time()
+    ip = _client_ip(http_request)
+    # Atomic per-IP + global rate limiting — caps attempts regardless of
+    # concurrency, so parallel brute-force can't outrun the lockout.
+    if not login_ip_limiter.allow(ip, now):
+        raise HTTPException(
+            status_code=429, detail=_RATE_LIMIT_DETAIL, headers={"Retry-After": "300"}
+        )
+    if not login_global_limiter.allow("*", now):
+        raise HTTPException(
+            status_code=429, detail=_RATE_LIMIT_DETAIL, headers={"Retry-After": "60"}
+        )
+    if not auth.verify_credentials(credentials.username, credentials.password):
+        await asyncio.sleep(1)  # extra friction on the (capped) failed attempts
         raise HTTPException(status_code=401, detail="שם משתמש או סיסמה שגויים")
-    return {"token": auth.issue_token(request.username)}
+    login_ip_limiter.reset(ip)  # a successful login clears the IP's counter
+    return {"token": auth.issue_token(credentials.username)}
 
 
 @app.get("/api/templates", response_model=List[TemplateInfo])
