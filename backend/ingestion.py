@@ -21,6 +21,20 @@ class UnsupportedFileError(ValueError):
     pass
 
 
+def _ocr_pdf(data: bytes) -> str:
+    """OCR a scanned (text-layerless) PDF locally with Tesseract (heb+eng).
+
+    Renders each page at 300 DPI via poppler and runs Tesseract. CPU-bound and
+    slower than text extraction, so it only runs when pypdf finds no text.
+    """
+    import pytesseract
+    from pdf2image import convert_from_bytes
+
+    images = convert_from_bytes(data, dpi=300)
+    parts = [pytesseract.image_to_string(image, lang="heb+eng") for image in images]
+    return "\n\n".join(part.strip() for part in parts if part.strip()).strip()
+
+
 def extract_text(filename: str, mime_type: str, data: bytes) -> str:
     name = (filename or "").lower()
 
@@ -30,9 +44,13 @@ def extract_text(filename: str, mime_type: str, data: bytes) -> str:
         reader = PdfReader(io.BytesIO(data))
         pages = [page.extract_text() or "" for page in reader.pages]
         text = "\n\n".join(pages).strip()
+        if text:
+            return text
+        # No text layer — a scanned PDF. OCR it locally (Hebrew + English).
+        text = _ocr_pdf(data)
         if not text:
             raise UnsupportedFileError(
-                "לא נמצא טקסט בקובץ ה-PDF. ייתכן שמדובר בקובץ סרוק הדורש OCR."
+                "לא ניתן לחלץ טקסט מקובץ ה-PDF, גם לאחר OCR. ודא שהסריקה ברורה."
             )
         return text
 
