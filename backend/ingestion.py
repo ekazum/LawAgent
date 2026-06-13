@@ -2,7 +2,7 @@ import io
 import re
 import threading
 
-from db import EMBEDDING_DIM
+from constants import EMBEDDING_DIM
 
 # Multilingual local embedding model (Hebrew included), 768-dim — matches the
 # pgvector schema. Downloaded from Hugging Face on first use (~1GB), then cached.

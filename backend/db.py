@@ -1,100 +1,13 @@
 import os
-from typing import TYPE_CHECKING, Optional, cast
+from typing import Optional, cast
 
 from psycopg_pool import ConnectionPool
 
-if TYPE_CHECKING:
-    from typing import LiteralString
-
-
-def _sql(query: str) -> "LiteralString":
-    """Mark an internally-built query as a LiteralString for psycopg's stubs.
-
-    psycopg types the query param as LiteralString to discourage dynamic SQL.
-    Our queries interpolate only module constants and whitelisted identifiers
-    (never user input) and bind every value via %s placeholders, so they are
-    injection-safe — this cast just tells the type checker so.
-    """
-    return cast("LiteralString", query)
+import queries
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://lawagent:lawagent@127.0.0.1:5432/lawagent"
 )
-
-EMBEDDING_DIM = 768
-
-SCHEMA_SQL = f"""
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE IF NOT EXISTS documents (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    doc_type TEXT NOT NULL CHECK (doc_type IN ('guideline', 'example', 'precedent')),
-    mime_type TEXT,
-    chunk_count INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS chunks (
-    id SERIAL PRIMARY KEY,
-    document_id INT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    chunk_index INT NOT NULL,
-    section TEXT,
-    content TEXT NOT NULL,
-    embedding vector({EMBEDDING_DIM}) NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS chunks_embedding_idx
-    ON chunks USING hnsw (embedding vector_cosine_ops);
-
-CREATE TABLE IF NOT EXISTS conversations (
-    id SERIAL PRIMARY KEY,
-    title TEXT NOT NULL,
-    owner TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id SERIAL PRIMARY KEY,
-    conversation_id INT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS messages_conversation_idx
-    ON messages (conversation_id, id);
-
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS category TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS case_number TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS court TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS parties TEXT;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS decision_date TEXT;
-
-ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner TEXT;
-CREATE INDEX IF NOT EXISTS conversations_owner_idx ON conversations (owner);
-
-CREATE TABLE IF NOT EXISTS categories (
-    id SERIAL PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL
-);
-
-INSERT INTO categories (name)
-SELECT unnest(ARRAY[
-    'שעות נוספות ושעות עבודה',
-    'פיטורים ופיצויי פיטורים',
-    'שימוע',
-    'שכר והלנת שכר',
-    'הטרדה ואפליה',
-    'יחסי עובד-מעביד',
-    'חופשה, מחלה והבראה',
-    'הסכמים קיבוציים',
-    'סודיות ואי-תחרות',
-    'כללי'
-])
-WHERE NOT EXISTS (SELECT 1 FROM categories);
-"""
 
 _pool: Optional[ConnectionPool] = None
 
@@ -110,7 +23,7 @@ def get_pool() -> ConnectionPool:
 
 def init_schema() -> None:
     with get_pool().connection() as conn:
-        conn.execute(_sql(SCHEMA_SQL))
+        conn.execute(queries.SCHEMA)
 
 
 def close_pool() -> None:
@@ -122,12 +35,6 @@ def close_pool() -> None:
 
 def _vector_literal(embedding: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in embedding) + "]"
-
-
-DOCUMENT_COLUMNS = (
-    "id, name, doc_type, chunk_count, created_at, "
-    "category, case_number, court, parties, decision_date"
-)
 
 
 def _document_row_to_dict(row: tuple) -> dict:
@@ -158,12 +65,7 @@ def insert_document(
 ) -> dict:
     with get_pool().connection() as conn:
         row = conn.execute(
-            _sql(
-                "INSERT INTO documents "
-                "(name, doc_type, mime_type, chunk_count, category, case_number, court, parties, decision_date) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                f"RETURNING {DOCUMENT_COLUMNS}"
-            ),
+            queries.INSERT_DOCUMENT,
             (
                 name,
                 doc_type,
@@ -180,10 +82,7 @@ def insert_document(
         document_id = row[0]
         with conn.cursor() as cursor:
             cursor.executemany(
-                _sql(
-                    "INSERT INTO chunks (document_id, chunk_index, section, content, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s::vector)"
-                ),
+                queries.INSERT_CHUNK,
                 [
                     (
                         document_id,
@@ -199,12 +98,10 @@ def insert_document(
 
 
 def list_documents(category: Optional[str] = None) -> list[dict]:
-    where = "WHERE category = %s" if category else ""
     params = (category,) if category else ()
     with get_pool().connection() as conn:
         rows = conn.execute(
-            _sql(f"SELECT {DOCUMENT_COLUMNS} FROM documents {where} ORDER BY created_at DESC"),
-            params,
+            queries.select_documents(bool(category)), params
         ).fetchall()
     return [_document_row_to_dict(row) for row in rows]
 
@@ -227,10 +124,9 @@ def update_document(document_id: int, fields: dict) -> Optional[dict]:
     }
     if not updates:
         return None
-    set_clause = ", ".join(f"{key} = %s" for key in updates)
     with get_pool().connection() as conn:
         row = conn.execute(
-            _sql(f"UPDATE documents SET {set_clause} WHERE id = %s RETURNING {DOCUMENT_COLUMNS}"),
+            queries.update_document(updates.keys()),
             (*updates.values(), document_id),
         ).fetchone()
     if row is None:
@@ -240,9 +136,7 @@ def update_document(document_id: int, fields: dict) -> Optional[dict]:
 
 def delete_document(document_id: int) -> bool:
     with get_pool().connection() as conn:
-        row = conn.execute(
-            "DELETE FROM documents WHERE id = %s RETURNING id", (document_id,)
-        ).fetchone()
+        row = conn.execute(queries.DELETE_DOCUMENT, (document_id,)).fetchone()
     return row is not None
 
 
@@ -252,25 +146,15 @@ def search_chunks(
     doc_types: Optional[list[str]] = None,
     category: Optional[str] = None,
 ) -> list[dict]:
-    conditions = []
     params: list = [_vector_literal(query_embedding)]
     if doc_types:
-        conditions.append("d.doc_type = ANY(%s)")
         params.append(doc_types)
     if category:
-        conditions.append("d.category = %s")
         params.append(category)
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.append(top_k)
     with get_pool().connection() as conn:
         rows = conn.execute(
-            _sql(
-                "SELECT d.name, d.doc_type, c.chunk_index, c.section, c.content, "
-                "       c.embedding <=> %s::vector AS distance "
-                f"FROM chunks c JOIN documents d ON d.id = c.document_id {where} "
-                "ORDER BY distance ASC LIMIT %s"
-            ),
-            params,
+            queries.search_chunks(bool(doc_types), bool(category)), params
         ).fetchall()
     return [
         {
@@ -287,19 +171,13 @@ def search_chunks(
 
 def list_categories() -> list[dict]:
     with get_pool().connection() as conn:
-        rows = conn.execute("SELECT id, name FROM categories ORDER BY id").fetchall()
+        rows = conn.execute(queries.SELECT_CATEGORIES).fetchall()
     return [{"id": row[0], "name": row[1]} for row in rows]
 
 
 def add_category(name: str) -> Optional[dict]:
     with get_pool().connection() as conn:
-        row = conn.execute(
-            _sql(
-                "INSERT INTO categories (name) VALUES (%s) "
-                "ON CONFLICT (name) DO NOTHING RETURNING id, name"
-            ),
-            (name,),
-        ).fetchone()
+        row = conn.execute(queries.INSERT_CATEGORY, (name,)).fetchone()
     if row is None:
         return None
     row = cast(tuple, row)
@@ -308,40 +186,24 @@ def add_category(name: str) -> Optional[dict]:
 
 def delete_category(category_id: int) -> bool:
     with get_pool().connection() as conn:
-        row = conn.execute(
-            "DELETE FROM categories WHERE id = %s RETURNING name", (category_id,)
-        ).fetchone()
+        row = conn.execute(queries.DELETE_CATEGORY, (category_id,)).fetchone()
         if row is None:
             return False
         row = cast(tuple, row)
-        conn.execute(
-            "UPDATE documents SET category = NULL WHERE category = %s", (row[0],)
-        )
+        conn.execute(queries.CLEAR_DOCUMENTS_CATEGORY, (row[0],))
     return True
 
 
 def create_conversation(title: str, owner: str) -> dict:
     with get_pool().connection() as conn:
-        row = conn.execute(
-            _sql(
-                "INSERT INTO conversations (title, owner) VALUES (%s, %s) "
-                "RETURNING id, created_at"
-            ),
-            (title, owner),
-        ).fetchone()
+        row = conn.execute(queries.INSERT_CONVERSATION, (title, owner)).fetchone()
     row = cast(tuple, row)  # INSERT ... RETURNING always yields a row
     return {"id": row[0], "title": title, "updated_at": row[1].isoformat()}
 
 
 def list_conversations(owner: str) -> list[dict]:
     with get_pool().connection() as conn:
-        rows = conn.execute(
-            _sql(
-                "SELECT id, title, updated_at FROM conversations "
-                "WHERE owner = %s ORDER BY updated_at DESC"
-            ),
-            (owner,),
-        ).fetchall()
+        rows = conn.execute(queries.SELECT_CONVERSATIONS, (owner,)).fetchall()
     return [
         {"id": row[0], "title": row[1], "updated_at": row[2].isoformat()}
         for row in rows
@@ -351,8 +213,7 @@ def list_conversations(owner: str) -> list[dict]:
 def delete_conversation(conversation_id: int, owner: str) -> bool:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "DELETE FROM conversations WHERE id = %s AND owner = %s RETURNING id",
-            (conversation_id, owner),
+            queries.DELETE_CONVERSATION, (conversation_id, owner)
         ).fetchone()
     return row is not None
 
@@ -362,28 +223,15 @@ def get_conversation_messages(
 ) -> Optional[list[dict]]:
     with get_pool().connection() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM conversations WHERE id = %s AND owner = %s",
-            (conversation_id, owner),
+            queries.CONVERSATION_EXISTS, (conversation_id, owner)
         ).fetchone()
         if exists is None:
             return None
-        rows = conn.execute(
-            _sql(
-                "SELECT role, content FROM messages "
-                "WHERE conversation_id = %s ORDER BY id ASC"
-            ),
-            (conversation_id,),
-        ).fetchall()
+        rows = conn.execute(queries.SELECT_MESSAGES, (conversation_id,)).fetchall()
     return [{"role": row[0], "content": row[1]} for row in rows]
 
 
 def add_message(conversation_id: int, role: str, content: str) -> None:
     with get_pool().connection() as conn:
-        conn.execute(
-            "INSERT INTO messages (conversation_id, role, content) VALUES (%s, %s, %s)",
-            (conversation_id, role, content),
-        )
-        conn.execute(
-            "UPDATE conversations SET updated_at = now() WHERE id = %s",
-            (conversation_id,),
-        )
+        conn.execute(queries.INSERT_MESSAGE, (conversation_id, role, content))
+        conn.execute(queries.TOUCH_CONVERSATION, (conversation_id,))
