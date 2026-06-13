@@ -10,3 +10,9 @@ DOC_TYPE_LABELS = {
 }
 
 IMAGE_MEDIA_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+
+# Upload size caps (raw decoded bytes). Caddy enforces a 40MB body ceiling
+# upstream; these give per-path limits with friendly messages.
+MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024  # knowledge-base document
+MAX_CHAT_FILE_BYTES = 10 * 1024 * 1024  # single chat attachment
+MAX_CHAT_FILES_TOTAL_BYTES = 25 * 1024 * 1024  # all attachments in one message

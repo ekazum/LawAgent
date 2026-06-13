@@ -3,6 +3,12 @@
 }
 
 anat-lawagent.duckdns.org {
+	# Hard ceiling against unbounded uploads (chat base64 inflates ~33%, so a
+	# 25MB attachment total ≈ 33MB body). App-level checks give nicer errors.
+	request_body {
+		max_size 40MB
+	}
+
 	reverse_proxy app:8000
 
 	header {

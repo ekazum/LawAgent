@@ -32,6 +32,9 @@ from constants import (
     CHAT_MODEL,
     DOC_TYPES,
     IMAGE_MEDIA_TYPES,
+    MAX_CHAT_FILE_BYTES,
+    MAX_CHAT_FILES_TOTAL_BYTES,
+    MAX_DOCUMENT_UPLOAD_BYTES,
     MAX_RESPONSE_TOKENS,
     MAX_TOOL_ITERATIONS,
 )
@@ -225,9 +228,16 @@ async def upload_document(
             detail=f"סוג מסמך לא חוקי: {doc_type}. ערכים חוקיים: auto, {', '.join(DOC_TYPES)}",
         )
 
+    # Reject oversized uploads before reading the whole file into memory when
+    # the multipart size is known; len(data) is the backstop otherwise.
+    if file.size is not None and file.size > MAX_DOCUMENT_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="הקובץ גדול מדי — מקסימום 25MB.")
+
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="הקובץ שהועלה ריק.")
+    if len(data) > MAX_DOCUMENT_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="הקובץ גדול מדי — מקסימום 25MB.")
 
     try:
         text = extract_text(file.filename or "", file.content_type or "", data)
@@ -627,6 +637,14 @@ def _chat_stream(req: ChatRequest, api_key: str, owner: str) -> Iterator[str]:
     yield _sse({"type": "done", "conversation_id": conversation_id})
 
 
+def _b64_decoded_size(data_b64: str) -> int:
+    s = data_b64.strip()
+    if not s:
+        return 0
+    padding = 2 if s.endswith("==") else 1 if s.endswith("=") else 0
+    return (len(s) // 4) * 3 - padding
+
+
 @app.post("/api/chat")
 def chat(
     req: ChatRequest,
@@ -636,6 +654,19 @@ def chat(
     api_key = _resolve_api_key(x_api_key)
     if req.template and req.template not in TEMPLATES:
         raise HTTPException(status_code=400, detail=f"תבנית לא מוכרת: {req.template}")
+    total_attached = 0
+    for attached in req.all_files:
+        size = _b64_decoded_size(attached.data_base64)
+        if size > MAX_CHAT_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"הקובץ '{attached.name or 'ללא שם'}' גדול מדי — מקסימום 10MB לקובץ.",
+            )
+        total_attached += size
+    if total_attached > MAX_CHAT_FILES_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=413, detail="סך הקבצים המצורפים גדול מדי — מקסימום 25MB."
+        )
     return StreamingResponse(
         _chat_stream(req, api_key, user),
         media_type="text/event-stream",
