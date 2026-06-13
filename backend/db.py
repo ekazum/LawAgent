@@ -1,7 +1,21 @@
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from psycopg_pool import ConnectionPool
+
+if TYPE_CHECKING:
+    from typing import LiteralString
+
+
+def _sql(query: str) -> "LiteralString":
+    """Mark an internally-built query as a LiteralString for psycopg's stubs.
+
+    psycopg types the query param as LiteralString to discourage dynamic SQL.
+    Our queries interpolate only module constants and whitelisted identifiers
+    (never user input) and bind every value via %s placeholders, so they are
+    injection-safe — this cast just tells the type checker so.
+    """
+    return cast("LiteralString", query)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://lawagent:lawagent@127.0.0.1:5432/lawagent"
@@ -87,14 +101,16 @@ _pool: Optional[ConnectionPool] = None
 
 def get_pool() -> ConnectionPool:
     global _pool
-    if _pool is None:
-        _pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=5, open=True)
-    return _pool
+    pool = _pool
+    if pool is None:
+        pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=5, open=True)
+        _pool = pool
+    return pool
 
 
 def init_schema() -> None:
     with get_pool().connection() as conn:
-        conn.execute(SCHEMA_SQL)
+        conn.execute(_sql(SCHEMA_SQL))
 
 
 def close_pool() -> None:
@@ -114,7 +130,7 @@ DOCUMENT_COLUMNS = (
 )
 
 
-def _document_row_to_dict(row) -> dict:
+def _document_row_to_dict(row: tuple) -> dict:
     return {
         "id": row[0],
         "name": row[1],
@@ -142,10 +158,12 @@ def insert_document(
 ) -> dict:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "INSERT INTO documents "
-            "(name, doc_type, mime_type, chunk_count, category, case_number, court, parties, decision_date) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            f"RETURNING {DOCUMENT_COLUMNS}",
+            _sql(
+                "INSERT INTO documents "
+                "(name, doc_type, mime_type, chunk_count, category, case_number, court, parties, decision_date) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                f"RETURNING {DOCUMENT_COLUMNS}"
+            ),
             (
                 name,
                 doc_type,
@@ -158,11 +176,14 @@ def insert_document(
                 decision_date,
             ),
         ).fetchone()
+        row = cast(tuple, row)  # INSERT ... RETURNING always yields a row
         document_id = row[0]
         with conn.cursor() as cursor:
             cursor.executemany(
-                "INSERT INTO chunks (document_id, chunk_index, section, content, embedding) "
-                "VALUES (%s, %s, %s, %s, %s::vector)",
+                _sql(
+                    "INSERT INTO chunks (document_id, chunk_index, section, content, embedding) "
+                    "VALUES (%s, %s, %s, %s, %s::vector)"
+                ),
                 [
                     (
                         document_id,
@@ -182,7 +203,7 @@ def list_documents(category: Optional[str] = None) -> list[dict]:
     params = (category,) if category else ()
     with get_pool().connection() as conn:
         rows = conn.execute(
-            f"SELECT {DOCUMENT_COLUMNS} FROM documents {where} ORDER BY created_at DESC",
+            _sql(f"SELECT {DOCUMENT_COLUMNS} FROM documents {where} ORDER BY created_at DESC"),
             params,
         ).fetchall()
     return [_document_row_to_dict(row) for row in rows]
@@ -209,10 +230,12 @@ def update_document(document_id: int, fields: dict) -> Optional[dict]:
     set_clause = ", ".join(f"{key} = %s" for key in updates)
     with get_pool().connection() as conn:
         row = conn.execute(
-            f"UPDATE documents SET {set_clause} WHERE id = %s RETURNING {DOCUMENT_COLUMNS}",
+            _sql(f"UPDATE documents SET {set_clause} WHERE id = %s RETURNING {DOCUMENT_COLUMNS}"),
             (*updates.values(), document_id),
         ).fetchone()
-    return _document_row_to_dict(row) if row else None
+    if row is None:
+        return None
+    return _document_row_to_dict(cast(tuple, row))
 
 
 def delete_document(document_id: int) -> bool:
@@ -241,10 +264,12 @@ def search_chunks(
     params.append(top_k)
     with get_pool().connection() as conn:
         rows = conn.execute(
-            "SELECT d.name, d.doc_type, c.chunk_index, c.section, c.content, "
-            "       c.embedding <=> %s::vector AS distance "
-            f"FROM chunks c JOIN documents d ON d.id = c.document_id {where} "
-            "ORDER BY distance ASC LIMIT %s",
+            _sql(
+                "SELECT d.name, d.doc_type, c.chunk_index, c.section, c.content, "
+                "       c.embedding <=> %s::vector AS distance "
+                f"FROM chunks c JOIN documents d ON d.id = c.document_id {where} "
+                "ORDER BY distance ASC LIMIT %s"
+            ),
             params,
         ).fetchall()
     return [
@@ -269,11 +294,16 @@ def list_categories() -> list[dict]:
 def add_category(name: str) -> Optional[dict]:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "INSERT INTO categories (name) VALUES (%s) "
-            "ON CONFLICT (name) DO NOTHING RETURNING id, name",
+            _sql(
+                "INSERT INTO categories (name) VALUES (%s) "
+                "ON CONFLICT (name) DO NOTHING RETURNING id, name"
+            ),
             (name,),
         ).fetchone()
-    return {"id": row[0], "name": row[1]} if row else None
+    if row is None:
+        return None
+    row = cast(tuple, row)
+    return {"id": row[0], "name": row[1]}
 
 
 def delete_category(category_id: int) -> bool:
@@ -283,6 +313,7 @@ def delete_category(category_id: int) -> bool:
         ).fetchone()
         if row is None:
             return False
+        row = cast(tuple, row)
         conn.execute(
             "UPDATE documents SET category = NULL WHERE category = %s", (row[0],)
         )
@@ -292,18 +323,23 @@ def delete_category(category_id: int) -> bool:
 def create_conversation(title: str, owner: str) -> dict:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "INSERT INTO conversations (title, owner) VALUES (%s, %s) "
-            "RETURNING id, created_at",
+            _sql(
+                "INSERT INTO conversations (title, owner) VALUES (%s, %s) "
+                "RETURNING id, created_at"
+            ),
             (title, owner),
         ).fetchone()
+    row = cast(tuple, row)  # INSERT ... RETURNING always yields a row
     return {"id": row[0], "title": title, "updated_at": row[1].isoformat()}
 
 
 def list_conversations(owner: str) -> list[dict]:
     with get_pool().connection() as conn:
         rows = conn.execute(
-            "SELECT id, title, updated_at FROM conversations "
-            "WHERE owner = %s ORDER BY updated_at DESC",
+            _sql(
+                "SELECT id, title, updated_at FROM conversations "
+                "WHERE owner = %s ORDER BY updated_at DESC"
+            ),
             (owner,),
         ).fetchall()
     return [
@@ -332,8 +368,10 @@ def get_conversation_messages(
         if exists is None:
             return None
         rows = conn.execute(
-            "SELECT role, content FROM messages "
-            "WHERE conversation_id = %s ORDER BY id ASC",
+            _sql(
+                "SELECT role, content FROM messages "
+                "WHERE conversation_id = %s ORDER BY id ASC"
+            ),
             (conversation_id,),
         ).fetchall()
     return [{"role": row[0], "content": row[1]} for row in rows]
