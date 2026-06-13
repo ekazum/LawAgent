@@ -104,7 +104,10 @@ function App() {
     try {
       const response = await apiFetch("/api/conversations");
       if (response.ok) {
-        setConversations((await response.json()) as ConversationInfo[]);
+        const data = await response.json();
+        // Guard against a non-array body (e.g. a 401 {detail} that slips
+        // through) poisoning state — .map() on it would crash the render.
+        if (Array.isArray(data)) setConversations(data as ConversationInfo[]);
       }
     } catch {
       // DB unavailable — sidebar stays empty, chat still works statelessly.
@@ -134,8 +137,11 @@ function App() {
     if (authState !== "ready") return;
     void refreshConversations();
     apiFetch("/api/templates")
-      .then((response) => response.json())
-      .then((data) => setTemplates(data as TemplateInfo[]))
+      .then(async (response) => {
+        if (!response.ok) return; // e.g. a stale-token 401 — don't poison state
+        const data = await response.json();
+        if (Array.isArray(data)) setTemplates(data as TemplateInfo[]);
+      })
       .catch(() => {});
   }, [authState, refreshConversations]);
 
