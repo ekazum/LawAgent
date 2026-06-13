@@ -4,7 +4,9 @@ Web-based legal assistant for Israeli employment law.
 
 ## Project structure
 
-- `backend/main.py` - FastAPI backend with Claude (Anthropic) + legal retrieval tool.
+- `backend/app.py` - FastAPI app: routes, middleware, static serving (`uvicorn app:app`).
+- `backend/main.py` - CLI entry point (`python main.py`).
+- `backend/chat_service.py` - chat streaming logic; `classification.py` - document auto-classification.
 - `backend/requirements.txt` - Backend dependencies.
 - `frontend/` - React + TypeScript UI (Vite).
 - `docker-compose.yml` - Postgres + pgvector for the knowledge base.
@@ -38,7 +40,7 @@ Starts Postgres 17 with the pgvector extension on port 5432 (user/password/db:
 cd backend
 pip install -r requirements.txt
 $env:ANTHROPIC_API_KEY = "your_key"
-uvicorn main:app --host 127.0.0.1 --port 8000
+uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
 Environment variables:
