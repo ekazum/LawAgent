@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-import db
+from db import database
 from constants import DOC_TYPE_LABELS, DOC_TYPES
 from ingestion import chunk_text, embed_documents, embed_query
 from prompts import KB_EMPTY_MESSAGE, KB_UNAVAILABLE_MESSAGE
@@ -152,7 +152,7 @@ def run_search(
     doc_types = [doc_type] if doc_type in DOC_TYPES else None
     try:
         query_embedding = embed_query(query)
-        results = db.search_chunks(
+        results = database.search_chunks(
             query_embedding, top_k=5, doc_types=doc_types, category=category or None
         )
     except Exception as error:
@@ -172,7 +172,7 @@ def coerce_category(value: Optional[str]) -> Optional[str]:
     if not candidate:
         return None
     try:
-        names = [item["name"] for item in db.list_categories()]
+        names = [item["name"] for item in database.list_categories()]
     except Exception:
         return None
     if candidate in names:
@@ -195,7 +195,7 @@ def save_precedent(tool_input: dict) -> str:
         embeddings = embed_documents([chunk["content"] for chunk in chunks])
         for chunk, embedding in zip(chunks, embeddings):
             chunk["embedding"] = embedding
-        document = db.insert_document(
+        document = database.insert_document(
             name=name[:200],
             doc_type="precedent",
             mime_type="text/plain",

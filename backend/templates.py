@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-import db
+from db import database
 from ingestion import embed_query
 from tools import format_chunks
 
@@ -56,7 +56,7 @@ TEMPLATES: dict[str, dict[str, Any]] = {
 def template_context(query: str, doc_types: list[str]) -> str:
     try:
         query_embedding = embed_query(query)
-        results = db.search_chunks(query_embedding, top_k=6, doc_types=doc_types)
+        results = database.search_chunks(query_embedding, top_k=6, doc_types=doc_types)
     except Exception as error:
         logger.warning("template pre-retrieval failed: %s", error)
         return ""

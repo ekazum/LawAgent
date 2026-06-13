@@ -1,8 +1,10 @@
 """FastAPI application: app object, middleware, and all route handlers.
 
 Run with `uvicorn app:app` (Docker) or `python main.py` (local CLI).
-Non-routing logic lives in chat_service.py, classification.py, and
-dependencies.py.
+Routes receive their collaborators (Database, Authenticator, ChatService)
+via the get_* Depends providers. The require_session middleware and the
+lifespan run outside FastAPI's dependency system, so they use the module
+singletons (authenticator, database) directly.
 """
 
 import asyncio
@@ -27,9 +29,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-import auth
-import db
-from chat_service import b64_decoded_size, chat_stream
+from auth import Authenticator, authenticator, get_authenticator
+from chat_service import ChatService, b64_decoded_size, get_chat_service
 from classification import classify_document
 from constants import (
     DOC_TYPES,
@@ -37,6 +38,7 @@ from constants import (
     MAX_CHAT_FILES_TOTAL_BYTES,
     MAX_DOCUMENT_UPLOAD_BYTES,
 )
+from db import Database, database, get_database
 from dependencies import RATE_LIMIT_DETAIL, client_ip, current_user, resolve_api_key
 from ingestion import UnsupportedFileError, chunk_text, embed_documents, extract_text
 from ratelimit import login_global_limiter, login_ip_limiter
@@ -58,15 +60,16 @@ logger = logging.getLogger("lawagent")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Runs outside FastAPI DI — use the database singleton directly.
     try:
-        db.init_schema()
+        database.init_schema()
         logger.info("database schema ready")
     except Exception as error:
         logger.warning(
             "database unavailable, knowledge base features disabled: %s", error
         )
     yield
-    db.close_pool()
+    database.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -77,14 +80,15 @@ _AUTH_EXEMPT_PATHS = {"/api/login", "/api/auth/status"}
 
 @app.middleware("http")
 async def require_session(request: Request, call_next):
+    # Middleware runs before routing, outside FastAPI DI — use the singleton.
     path = request.url.path
     if (
-        auth.auth_required()
+        authenticator.auth_required()
         and path.startswith("/api")
         and path not in _AUTH_EXEMPT_PATHS
     ):
         token = request.headers.get("X-Session-Token", "")
-        if auth.verify_token(token) is None:
+        if authenticator.verify_token(token) is None:
             return JSONResponse({"detail": "נדרשת התחברות"}, status_code=401)
     return await call_next(request)
 
@@ -106,12 +110,16 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/auth/status")
-def auth_status() -> dict[str, bool]:
+def auth_status(auth: Authenticator = Depends(get_authenticator)) -> dict[str, bool]:
     return {"required": auth.auth_required()}
 
 
 @app.post("/api/login")
-async def login(http_request: Request, credentials: LoginRequest) -> dict[str, str]:
+async def login(
+    http_request: Request,
+    credentials: LoginRequest,
+    auth: Authenticator = Depends(get_authenticator),
+) -> dict[str, str]:
     now = time.time()
     ip = client_ip(http_request)
     # Atomic per-IP + global rate limiting — caps attempts regardless of
@@ -145,6 +153,7 @@ async def upload_document(
     doc_type: str = Form(...),
     category: str = Form(default=""),
     x_api_key: Optional[str] = Header(default=None),
+    db: Database = Depends(get_database),
 ) -> DocumentInfo:
     if doc_type != "auto" and doc_type not in DOC_TYPES:
         raise HTTPException(
@@ -239,11 +248,11 @@ async def upload_document(
 
 
 @app.get("/api/documents", response_model=List[DocumentInfo])
-def get_documents(category: Optional[str] = None) -> List[DocumentInfo]:
+def get_documents(
+    category: Optional[str] = None, db: Database = Depends(get_database)
+) -> List[DocumentInfo]:
     try:
-        return [
-            DocumentInfo(**document) for document in db.list_documents(category)
-        ]
+        return [DocumentInfo(**document) for document in db.list_documents(category)]
     except Exception as error:
         raise HTTPException(
             status_code=503, detail=f"מסד הנתונים אינו זמין: {error}"
@@ -251,7 +260,9 @@ def get_documents(category: Optional[str] = None) -> List[DocumentInfo]:
 
 
 @app.patch("/api/documents/{document_id}", response_model=DocumentInfo)
-def patch_document(document_id: int, update: DocumentUpdate) -> DocumentInfo:
+def patch_document(
+    document_id: int, update: DocumentUpdate, db: Database = Depends(get_database)
+) -> DocumentInfo:
     fields = update.model_dump(exclude_unset=True)
     if "doc_type" in fields and fields["doc_type"] not in DOC_TYPES:
         raise HTTPException(status_code=400, detail="סוג מסמך לא חוקי.")
@@ -269,7 +280,9 @@ def patch_document(document_id: int, update: DocumentUpdate) -> DocumentInfo:
 
 
 @app.delete("/api/documents/{document_id}", status_code=204)
-def remove_document(document_id: int) -> None:
+def remove_document(
+    document_id: int, db: Database = Depends(get_database)
+) -> None:
     try:
         deleted = db.delete_document(document_id)
     except Exception as error:
@@ -281,7 +294,7 @@ def remove_document(document_id: int) -> None:
 
 
 @app.get("/api/categories", response_model=List[CategoryInfo])
-def get_categories() -> List[CategoryInfo]:
+def get_categories(db: Database = Depends(get_database)) -> List[CategoryInfo]:
     try:
         return [CategoryInfo(**item) for item in db.list_categories()]
     except Exception as error:
@@ -291,7 +304,9 @@ def get_categories() -> List[CategoryInfo]:
 
 
 @app.post("/api/categories", response_model=CategoryInfo, status_code=201)
-def create_category(payload: CategoryCreate) -> CategoryInfo:
+def create_category(
+    payload: CategoryCreate, db: Database = Depends(get_database)
+) -> CategoryInfo:
     try:
         created = db.add_category(payload.name.strip())
     except Exception as error:
@@ -304,7 +319,9 @@ def create_category(payload: CategoryCreate) -> CategoryInfo:
 
 
 @app.delete("/api/categories/{category_id}", status_code=204)
-def remove_category(category_id: int) -> None:
+def remove_category(
+    category_id: int, db: Database = Depends(get_database)
+) -> None:
     try:
         deleted = db.delete_category(category_id)
     except Exception as error:
@@ -316,7 +333,9 @@ def remove_category(category_id: int) -> None:
 
 
 @app.get("/api/conversations", response_model=List[ConversationInfo])
-def get_conversations(user: str = Depends(current_user)) -> List[ConversationInfo]:
+def get_conversations(
+    user: str = Depends(current_user), db: Database = Depends(get_database)
+) -> List[ConversationInfo]:
     try:
         return [ConversationInfo(**item) for item in db.list_conversations(user)]
     except Exception as error:
@@ -330,7 +349,9 @@ def get_conversations(user: str = Depends(current_user)) -> List[ConversationInf
     response_model=List[ChatMessage],
 )
 def get_conversation(
-    conversation_id: int, user: str = Depends(current_user)
+    conversation_id: int,
+    user: str = Depends(current_user),
+    db: Database = Depends(get_database),
 ) -> List[ChatMessage]:
     try:
         messages = db.get_conversation_messages(conversation_id, user)
@@ -345,7 +366,9 @@ def get_conversation(
 
 @app.delete("/api/conversations/{conversation_id}", status_code=204)
 def remove_conversation(
-    conversation_id: int, user: str = Depends(current_user)
+    conversation_id: int,
+    user: str = Depends(current_user),
+    db: Database = Depends(get_database),
 ) -> None:
     try:
         deleted = db.delete_conversation(conversation_id, user)
@@ -362,6 +385,7 @@ def chat(
     req: ChatRequest,
     x_api_key: Optional[str] = Header(default=None),
     user: str = Depends(current_user),
+    svc: ChatService = Depends(get_chat_service),
 ) -> StreamingResponse:
     api_key = resolve_api_key(x_api_key)
     if req.template and req.template not in TEMPLATES:
@@ -380,7 +404,7 @@ def chat(
             status_code=413, detail="סך הקבצים המצורפים גדול מדי — מקסימום 25MB."
         )
     return StreamingResponse(
-        chat_stream(req, api_key, user),
+        svc.stream(req, api_key, user),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

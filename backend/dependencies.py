@@ -3,14 +3,16 @@
 import os
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
-import auth
+from auth import Authenticator, get_authenticator
 
 RATE_LIMIT_DETAIL = "יותר מדי ניסיונות התחברות. נסו שוב בעוד מספר דקות."
 
 
-def current_user(request: Request) -> str:
+def current_user(
+    request: Request, auth: Authenticator = Depends(get_authenticator)
+) -> str:
     """The logged-in username, used to scope per-user data (conversations).
 
     When auth is disabled (no APP_USERS, e.g. local dev) everything shares a
