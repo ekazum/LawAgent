@@ -11,7 +11,16 @@ from typing import Any, Iterator, List, Optional
 
 import anthropic
 import uvicorn
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -124,6 +133,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def current_user(request: Request) -> str:
+    """The logged-in username, used to scope per-user data (conversations).
+
+    When auth is disabled (no APP_USERS, e.g. local dev) everything shares a
+    single "local" owner. Otherwise the require_session middleware has already
+    rejected invalid tokens, so verify_token returns the real username here.
+    """
+    if not auth.auth_required():
+        return "local"
+    return auth.verify_token(request.headers.get("X-Session-Token", "")) or "local"
 
 
 def _resolve_api_key(x_api_key: Optional[str]) -> str:
@@ -361,9 +382,9 @@ def remove_category(category_id: int) -> None:
 
 
 @app.get("/api/conversations", response_model=List[ConversationInfo])
-def get_conversations() -> List[ConversationInfo]:
+def get_conversations(user: str = Depends(current_user)) -> List[ConversationInfo]:
     try:
-        return [ConversationInfo(**item) for item in db.list_conversations()]
+        return [ConversationInfo(**item) for item in db.list_conversations(user)]
     except Exception as error:
         raise HTTPException(
             status_code=503, detail=f"מסד הנתונים אינו זמין: {error}"
@@ -371,9 +392,11 @@ def get_conversations() -> List[ConversationInfo]:
 
 
 @app.get("/api/conversations/{conversation_id}/messages", response_model=List[ChatMessage])
-def get_conversation(conversation_id: int) -> List[ChatMessage]:
+def get_conversation(
+    conversation_id: int, user: str = Depends(current_user)
+) -> List[ChatMessage]:
     try:
-        messages = db.get_conversation_messages(conversation_id)
+        messages = db.get_conversation_messages(conversation_id, user)
     except Exception as error:
         raise HTTPException(
             status_code=503, detail=f"מסד הנתונים אינו זמין: {error}"
@@ -384,9 +407,11 @@ def get_conversation(conversation_id: int) -> List[ChatMessage]:
 
 
 @app.delete("/api/conversations/{conversation_id}", status_code=204)
-def remove_conversation(conversation_id: int) -> None:
+def remove_conversation(
+    conversation_id: int, user: str = Depends(current_user)
+) -> None:
     try:
-        deleted = db.delete_conversation(conversation_id)
+        deleted = db.delete_conversation(conversation_id, user)
     except Exception as error:
         raise HTTPException(
             status_code=503, detail=f"מסד הנתונים אינו זמין: {error}"
@@ -432,7 +457,7 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
+def _chat_stream(req: ChatRequest, api_key: str, owner: str) -> Iterator[str]:
     template = TEMPLATES.get(req.template) if req.template else None
     if template is not None:
         template_label: Optional[str] = template["label"]
@@ -450,7 +475,7 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
     persist = True
     try:
         if conversation_id is not None:
-            stored = db.get_conversation_messages(conversation_id)
+            stored = db.get_conversation_messages(conversation_id, owner)
             if stored is None:
                 yield _sse({"type": "error", "detail": "השיחה לא נמצאה."})
                 return
@@ -458,7 +483,7 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
         else:
             prefix = f"[{template_label}] " if template_label else ""
             title = (prefix + req.message).strip()[:80]
-            conversation_id = db.create_conversation(title)["id"]
+            conversation_id = db.create_conversation(title, owner)["id"]
     except Exception as error:
         logger.warning("conversation persistence unavailable: %s", error)
         persist = False
@@ -604,13 +629,15 @@ def _chat_stream(req: ChatRequest, api_key: str) -> Iterator[str]:
 
 @app.post("/api/chat")
 def chat(
-    req: ChatRequest, x_api_key: Optional[str] = Header(default=None)
+    req: ChatRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    user: str = Depends(current_user),
 ) -> StreamingResponse:
     api_key = _resolve_api_key(x_api_key)
     if req.template and req.template not in TEMPLATES:
         raise HTTPException(status_code=400, detail=f"תבנית לא מוכרת: {req.template}")
     return StreamingResponse(
-        _chat_stream(req, api_key),
+        _chat_stream(req, api_key, user),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

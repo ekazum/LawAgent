@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS chunks_embedding_idx
 CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,
+    owner TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -56,6 +57,9 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS case_number TEXT;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS court TEXT;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS parties TEXT;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS decision_date TEXT;
+
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS owner TEXT;
+CREATE INDEX IF NOT EXISTS conversations_owner_idx ON conversations (owner);
 
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
@@ -285,19 +289,22 @@ def delete_category(category_id: int) -> bool:
     return True
 
 
-def create_conversation(title: str) -> dict:
+def create_conversation(title: str, owner: str) -> dict:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "INSERT INTO conversations (title) VALUES (%s) RETURNING id, created_at",
-            (title,),
+            "INSERT INTO conversations (title, owner) VALUES (%s, %s) "
+            "RETURNING id, created_at",
+            (title, owner),
         ).fetchone()
     return {"id": row[0], "title": title, "updated_at": row[1].isoformat()}
 
 
-def list_conversations() -> list[dict]:
+def list_conversations(owner: str) -> list[dict]:
     with get_pool().connection() as conn:
         rows = conn.execute(
-            "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC"
+            "SELECT id, title, updated_at FROM conversations "
+            "WHERE owner = %s ORDER BY updated_at DESC",
+            (owner,),
         ).fetchall()
     return [
         {"id": row[0], "title": row[1], "updated_at": row[2].isoformat()}
@@ -305,19 +312,22 @@ def list_conversations() -> list[dict]:
     ]
 
 
-def delete_conversation(conversation_id: int) -> bool:
+def delete_conversation(conversation_id: int, owner: str) -> bool:
     with get_pool().connection() as conn:
         row = conn.execute(
-            "DELETE FROM conversations WHERE id = %s RETURNING id",
-            (conversation_id,),
+            "DELETE FROM conversations WHERE id = %s AND owner = %s RETURNING id",
+            (conversation_id, owner),
         ).fetchone()
     return row is not None
 
 
-def get_conversation_messages(conversation_id: int) -> Optional[list[dict]]:
+def get_conversation_messages(
+    conversation_id: int, owner: str
+) -> Optional[list[dict]]:
     with get_pool().connection() as conn:
         exists = conn.execute(
-            "SELECT 1 FROM conversations WHERE id = %s", (conversation_id,)
+            "SELECT 1 FROM conversations WHERE id = %s AND owner = %s",
+            (conversation_id, owner),
         ).fetchone()
         if exists is None:
             return None
