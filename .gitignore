@@ -134,8 +134,9 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Security findings — keep local only, never in the repo
+# Security findings & case research — keep local only, never in the repo
 SECURITY-SCAN.md
+court-decisions-anat-shani.md
 
 # Environments
 .env
