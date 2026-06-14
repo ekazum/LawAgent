@@ -42,12 +42,21 @@ def extract_text(filename: str, mime_type: str, data: bytes) -> str:
         from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            # Owner-protected (view-only) PDFs open with an empty user password.
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
         pages = [page.extract_text() or "" for page in reader.pages]
         text = "\n\n".join(pages).strip()
-        if text:
-            return text
-        # No text layer — a scanned PDF. OCR it locally (Hebrew + English).
-        text = _ocr_pdf(data)
+        # Scanned PDFs often still carry a thin text layer (just page furniture
+        # like a date + "1/31"). If the layer is sparse (< ~100 chars/page),
+        # OCR the pages and keep whichever result is richer.
+        if len(text) < 100 * max(1, len(reader.pages)):
+            ocr_text = _ocr_pdf(data)
+            if len(ocr_text) > len(text):
+                text = ocr_text
         if not text:
             raise UnsupportedFileError(
                 "לא ניתן לחלץ טקסט מקובץ ה-PDF, גם לאחר OCR. ודא שהסריקה ברורה."
